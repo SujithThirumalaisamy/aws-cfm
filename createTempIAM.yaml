@@ -1,0 +1,84 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  UseGeneratedPassword:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Specify whether to use a generated password for the IAM user or not.
+Resources:
+  MyIAMUser:
+    Type: 'AWS::IAM::User'
+    Properties:
+      UserName: myIAMUser
+      LoginProfile:
+        Password: !If [UseGeneratedPassword, !GetAtt GeneratedPasswordResource.Password, !Ref ManualPassword]
+      Policies:
+        - PolicyName: myIAMUserPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:ListBucket'
+                Resource: '*'
+
+  ManualPassword:
+    Type: 'AWS::SSM::Parameter'
+    Condition: UseManualPassword
+    Properties:
+      Type: String
+      Description: "Manual password for IAM user"
+      Value: !Ref ManualPassword
+      Name: /MyIAMUser/ManualPassword
+      Tags:
+        - Key: Name
+          Value: ManualPassword
+
+  GeneratedPasswordResource:
+    Type: 'Custom::GeneratedPassword'
+    Condition: UseGeneratedPassword
+    Properties:
+      ServiceToken: !GetAtt PasswordGeneratorFunction.Arn
+      Length: 12
+
+  PasswordGeneratorFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt PasswordGeneratorFunctionRole.Arn
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+              const passwordLength = event.ResourceProperties.Length || 12;
+              const generatedPassword = generateRandomPassword(passwordLength);
+              return generatedPassword;
+          };
+      Runtime: nodejs14.x
+
+  PasswordGeneratorFunctionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: PasswordGeneratorFunctionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'secretsmanager:GetRandomPassword'
+                Resource: '*'
