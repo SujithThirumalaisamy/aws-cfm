@@ -1,5 +1,6 @@
-AWSTemplateFormatVersion: "2010-09-09"
-Description: CloudFormation stack for EC2 with SSH key pair and S3 URL stored in instance environment
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation stack for EC2 with SSH key pair and S3 URL stored in
+  instance environment
 
 Parameters:
   PublicKey:
@@ -17,33 +18,15 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub ${AWS::StackName}-tests3001-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
 
   MyKeyPair:
     Type: AWS::EC2::KeyPair
     Properties:
       KeyName: MyKeyPair
       PublicKeyMaterial: !Ref PublicKey
-
-  EC2Role:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ec2.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: EC2AccessPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ec2:DescribeInstances
-                  - ec2:DescribeInstanceAttribute
-                Resource: "*"
 
   TESTSG001:
     Type: AWS::EC2::SecurityGroup
@@ -88,8 +71,8 @@ Resources:
       # ImageId: ami-04b70fa74e45c3917 #Ubuntu 24.04 LTS 64bit x86
       ImageId: ami-07caf09b362be10b8 #Amazon Linux 2023 64bit x86
       KeyName: MyKeyPair
-      UserData:
-        Fn::Base64: !Sub |
+      UserData: !Base64
+        Fn::Sub: |
           #!/bin/bash
           echo "export S3_URL=https://${TESTS3001}.s3.amazonaws.com" >> /etc/profile
       Tags:
@@ -99,6 +82,7 @@ Resources:
         - !GetAtt TESTSG001.GroupId
         - !GetAtt TESTSG002.GroupId
         - !GetAtt TESTSG003.GroupId
+      IamInstanceProfile: !Ref TempInstanceProfile
 
   TempUser:
     Type: AWS::IAM::User
@@ -115,19 +99,48 @@ Resources:
     Properties:
       PolicyName: !Ref TempUserPolicyName
       PolicyDocument:
-        Version: "2012-10-17"
+        Version: '2012-10-17'
         Statement:
           - Effect: Allow
             Action:
               - s3:GetObject
               - s3:PutObject
+              - s3:ListBucket
             Resource:
               - !GetAtt TESTS3001.Arn
-            Condition:
-              StringEquals:
-                aws:SourceArn: !Sub "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/${TESTEC2001}"
+              - !Sub ${TESTS3001.Arn}/*
       Users:
         - !Ref TempUser
+
+  TempRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: EC2AccessS3Policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt TESTS3001.Arn
+                  - !Sub ${TESTS3001.Arn}/*
+
+  TempInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref TempRole
 
 Outputs:
   EC2InstanceIP:
